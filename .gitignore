@@ -29,3 +29,5 @@ chrome_profile_for_playwright/
 dist/
 build/
 *.egg-info/
+
+output/
