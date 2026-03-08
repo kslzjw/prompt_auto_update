@@ -107,11 +107,20 @@ async def main():
             print(f"🔄 迭代轮数：{SETTINGS['rounds']}")
             print(f"📁 结果保存至：{SETTINGS['output_dir']}\n")
 
-            # 执行工作流
-            results = await run_workflow(question, agents)
+            # 确保输出目录存在
+            os.makedirs(SETTINGS["output_dir"], exist_ok=True)
 
-            # 保存结果
-            save_results(question, results)
+            # 执行工作流并处理可能的异常
+            try:
+                results = await run_workflow(question, agents)
+                # 保存结果
+                save_results(question, results)
+            except Exception as e:
+                print(f"\n❌ 工作流执行出错: {str(e)}")
+                print("⚠️  由于中途报错，本次结果可能未完整保存。")
+                # 即使出错也尝试保存已有的 partial results（如果有的话）
+                if 'results' in locals() and results:
+                    save_results(question, results)
 
         await context.close()
 
