@@ -20,12 +20,12 @@ def get_agent(platform_id: str, page: Page):
         raise ValueError(f"不支持的平台：{platform_id}")
     return cls(page, platform_id)
 
-
 class BaseAgent:
     def __init__(self, page: Page, platform_id: str):
         self.page = page
         self.platform_id = platform_id
         self.config = PLATFORMS[platform_id]
+        self.has_active_chat = False
 
     async def open(self):
         """打开平台页面"""
@@ -79,9 +79,25 @@ class ChatGPTAgent(BaseAgent):
     async def send_and_get(self, text: str) -> str:
         page = self.page
 
-        # 导航到新对话（避免上下文污染）
-        await page.goto("https://chatgpt.com", wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        # 仅在没有活跃聊天时导航到新对话并等待 Cloudflare（避免上下文污染）
+        if not self.has_active_chat:
+            await page.goto("https://chatgpt.com", wait_until="domcontentloaded")
+            
+            # 增加防作弊检测等待：如果此时出现了 Cloudflare 或真人验证，等待用户手动点击通过（最长等待 30 秒）
+            print("   🔍 正在检查是否有 ChatGPT 验证/Cloudflare，如出现请手动点击...")
+            try:
+                # 判断是否有经典的验证元素（例如 Turnstile, challenge form）
+                await page.wait_for_selector(
+                    "input#prompt-textarea, textarea[data-id='root'], textarea[placeholder], [contenteditable='true']", 
+                    state="visible", 
+                    timeout=30000
+                )
+                print("   ✅ ChatGPT 验证通过，对话界面已加载！")
+                self.has_active_chat = True
+            except Exception:
+                print("   ⚠️ ChatGPT 聊天界面加载超时，可能还在验证页面或受到其他拦截。直接尝试继续...")
+            
+            await asyncio.sleep(2)
 
         # 定位输入框（多个 selector 备用）
         input_selectors = [
@@ -94,29 +110,22 @@ class ChatGPTAgent(BaseAgent):
         input_box = None
         for sel in input_selectors:
             try:
+                # 寻找输入框并等待其可交互
                 input_box = page.locator(sel).first
-                await input_box.wait_for(state="visible", timeout=5000)
+                await input_box.wait_for(state="visible", timeout=3000)
                 break
             except Exception:
                 continue
 
         if not input_box:
-            raise RuntimeError("ChatGPT: 找不到输入框")
+            raise RuntimeError("ChatGPT: 找不到输入框 (可能是验证未通过或者UI变更)")
 
-        # 清空并输入文本
+        # 聚焦并输入文本（对于复杂的富文本框，使用原生的 fill/type 最稳定）
         await input_box.click()
         await asyncio.sleep(0.5)
 
-        # 使用 clipboard 粘贴长文本（避免输入框截断）
-        await page.evaluate(f"""
-            const el = document.querySelector('#prompt-textarea') 
-                     || document.querySelector('textarea[data-id="root"]')
-                     || document.querySelector('textarea');
-            if (el) {{
-                el.value = {repr(text)};
-                el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            }}
-        """)
+        # 清空现有内容并输入
+        await input_box.fill(text)
         await asyncio.sleep(0.5)
 
         # 点击发送按钮
@@ -163,9 +172,24 @@ class ClaudeAgent(BaseAgent):
     async def send_and_get(self, text: str) -> str:
         page = self.page
 
-        # 导航到新对话
-        await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        # 仅在没有活跃聊天时导航到新对话
+        if not self.has_active_chat:
+            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+            
+            # 增加防作弊检测等待：如果此时出现了 Cloudflare 或真人验证，等待用户手动点击通过（最长等待 30 秒）
+            print("   🔍 正在检查是否有 Claude 验证/Cloudflare，如出现请手动点击...")
+            try:
+                await page.wait_for_selector(
+                    "div[contenteditable='true'].ProseMirror, div[contenteditable='true'], fieldset div[contenteditable='true']", 
+                    state="visible", 
+                    timeout=30000
+                )
+                print("   ✅ Claude 验证通过，对话界面已加载！")
+                self.has_active_chat = True
+            except Exception:
+                print("   ⚠️ Claude 聊天界面加载超时，可能还在验证页面或受到其他拦截。直接尝试继续...")
+
+            await asyncio.sleep(2)
 
         # 定位输入框
         input_selectors = [
@@ -178,29 +202,19 @@ class ClaudeAgent(BaseAgent):
         for sel in input_selectors:
             try:
                 input_box = page.locator(sel).first
-                await input_box.wait_for(state="visible", timeout=5000)
+                await input_box.wait_for(state="visible", timeout=3000)
                 break
             except Exception:
                 continue
 
         if not input_box:
-            raise RuntimeError("Claude: 找不到输入框")
+            raise RuntimeError("Claude: 找不到输入框 (可能是验证未通过或者UI变更)")
 
         await input_box.click()
         await asyncio.sleep(0.5)
 
-        # 使用 JS 注入文本到 contenteditable
-        await page.evaluate(f"""
-            const el = document.querySelector('div[contenteditable="true"]');
-            if (el) {{
-                el.focus();
-                // 清空现有内容
-                el.innerHTML = '';
-                // 插入新文本
-                const text = {repr(text)};
-                document.execCommand('insertText', false, text);
-            }}
-        """)
+        # 使用 Playwright 自身的 fill 进行输入，对 React 最稳定
+        await input_box.fill(text)
         await asyncio.sleep(0.5)
 
         # 点击发送
@@ -244,9 +258,11 @@ class GeminiAgent(BaseAgent):
     async def send_and_get(self, text: str) -> str:
         page = self.page
 
-        # 导航到新对话
-        await page.goto("https://gemini.google.com/app", wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        # 仅在没有活跃聊天时导航到新对话
+        if not self.has_active_chat:
+            await page.goto("https://gemini.google.com/app", wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+            self.has_active_chat = True
 
         # 定位输入框
         input_selectors = [
@@ -272,15 +288,7 @@ class GeminiAgent(BaseAgent):
         await asyncio.sleep(0.5)
 
         # 注入文本
-        await page.evaluate(f"""
-            const el = document.querySelector('rich-textarea div[contenteditable="true"]')
-                     || document.querySelector('div[contenteditable="true"]');
-            if (el) {{
-                el.focus();
-                el.innerHTML = '';
-                document.execCommand('insertText', false, {repr(text)});
-            }}
-        """)
+        await input_box.fill(text)
         await asyncio.sleep(0.5)
 
         # 发送

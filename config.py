@@ -44,7 +44,7 @@ SETTINGS = {
     "rounds": 2,
 
     # 结果保存目录
-    "output_dir": "./outputs",
+    "output_dir": "./output",
 
     # Chrome 用户数据目录（保留你的登录状态）
     # Windows 默认路径示例：

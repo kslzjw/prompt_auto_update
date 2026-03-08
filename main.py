@@ -5,12 +5,52 @@ Multi-Agent Answer Optimizer
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 from config import PLATFORMS, WORKFLOW, SETTINGS
 from agents import get_agent
+from playwright_stealth import Stealth
+
+
+def is_first_run() -> bool:
+    """检查是否是首次运行（Chrome Profile 目录不存在或为空）"""
+    profile_path = SETTINGS["chrome_profile_path"]
+    return not os.path.exists(profile_path) or not os.listdir(profile_path)
+
+
+async def ensure_logged_in(context):
+    """
+    检测登录状态，首次运行时引导用户手动登录各平台。
+    登录状态会保存在 chrome_profile_path 指定的目录中。
+    """
+    print("\n" + "="*50)
+    print("  🔐 首次登录设置")
+    print("="*50)
+    print(f"\n浏览器 Profile 将保存到：")
+    print(f"  {SETTINGS['chrome_profile_path']}\n")
+    print("浏览器已打开，请手动登录以下平台：")
+    for pid, p in PLATFORMS.items():
+        print(f"  - {p['name']}: {p['url']}")
+
+    # 打开各平台页面供用户登录
+    for pid, platform in PLATFORMS.items():
+        page = await context.new_page()
+        await Stealth().apply_stealth_async(page)
+        await page.goto(platform["url"])
+        print(f"  ✅ 已打开 {platform['name']}")
+
+    print("\n请在浏览器中完成登录后，回到终端按 Enter 键继续...")
+    input()
+
+    # 关闭登录用的标签页（保留登录状态），后续会重新打开 agent 页面
+    pages = context.pages[:]
+    for page in pages:
+        await page.close()
+
+    print("✅ 登录状态已保存！继续进入工作流...\n")
 
 
 async def main():
@@ -18,25 +58,22 @@ async def main():
     print("  🤖 Multi-Agent Answer Optimizer")
     print("="*60)
 
-    # 获取用户输入
-    question = input("\n📝 请输入你的问题：\n> ").strip()
-    if not question:
-        print("问题不能为空，退出。")
-        return
-
-    print(f"\n⚙️  工作流：{' → '.join(WORKFLOW)}")
-    print(f"🔄 迭代轮数：{SETTINGS['rounds']}")
-    print(f"📁 结果保存至：{SETTINGS['output_dir']}\n")
-
     # 启动浏览器（使用已有的用户 Profile，保留登录状态）
     async with async_playwright() as p:
-        print("🌐 启动浏览器中（使用你已有的 Chrome 登录状态）...")
+        first_run = is_first_run()
+        print("🌐 启动浏览器中...")
         context = await p.chromium.launch_persistent_context(
             user_data_dir=SETTINGS["chrome_profile_path"],
+            channel="chrome",
             headless=False,
-            args=["--start-maximized"],
+            args=["--start-maximized", "--disable-blink-features=AutomationControlled"],
+            ignore_default_args=["--enable-automation"],
             no_viewport=True,
         )
+
+        # 首次运行时，先引导用户登录各平台
+        if first_run:
+            await ensure_logged_in(context)
 
         # 初始化所有用到的 agent 页面
         agents = {}
@@ -46,22 +83,36 @@ async def main():
                 continue
             print(f"   打开 {PLATFORMS[platform_id]['name']} ...")
             page = await context.new_page()
+            await Stealth().apply_stealth_async(page)
             agent = get_agent(platform_id, page)
             await agent.open()
             agents[platform_id] = agent
             await asyncio.sleep(2)
 
-        print("\n✅ 所有页面已打开，开始优化流程...\n")
-        await asyncio.sleep(2)
+        print("\n✅ 所有页面已打开，现在你可以连续开始对话了。")
+        print("(输入 'exit' 或 'quit' 退出程序并关闭浏览器)\n")
 
-        # 执行工作流
-        results = await run_workflow(question, agents)
+        while True:
+            # 获取用户输入
+            question = input("\n📝 请输入你的问题：\n> ").strip()
+            
+            if not question:
+                continue
+            
+            if question.lower() in ["exit", "quit"]:
+                print("👋 退出程序...")
+                break
 
-        # 保存结果
-        save_results(question, results)
+            print(f"\n⚙️  工作流：{' → '.join(WORKFLOW)}")
+            print(f"🔄 迭代轮数：{SETTINGS['rounds']}")
+            print(f"📁 结果保存至：{SETTINGS['output_dir']}\n")
 
-        print("\n✅ 完成！按 Enter 键关闭浏览器...")
-        input()
+            # 执行工作流
+            results = await run_workflow(question, agents)
+
+            # 保存结果
+            save_results(question, results)
+
         await context.close()
 
 

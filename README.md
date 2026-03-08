@@ -1,139 +1,125 @@
 # 🤖 Multi-Agent Answer Optimizer
 
-Automatically orchestrate iterative answer refinement across ChatGPT, Claude, and Gemini using Playwright for real browser automation.
+使用 Playwright 自动控制真实浏览器，在 ChatGPT、Claude、Gemini 之间传递和迭代优化答案。
 
 ---
 
-## How It Works
+## 工作原理
 
 ```
-You enter a question
+你输入问题
     ↓
-Agent A (Drafter) generates an initial answer
+Agent A (起草者) 生成初始回答
     ↓
-Agent B (Critic) analyzes the answer and suggests improvements
+Agent B (批评者) 分析回答，提出改进建议
     ↓
-Agent A refines based on feedback
+Agent A 根据建议重新优化
     ↓
-(Repeat for N rounds)
+（重复 N 轮）
     ↓
-[Optional] Agent C (Synthesizer) distills the final version
+[可选] Agent C (综合者) 提炼最终版本
     ↓
-Results saved to outputs/
+保存结果到 outputs/ 目录
 ```
 
 ---
 
-## Quick Start
+## 快速开始
 
-### Step 1: Install Dependencies
+### 第一步：安装依赖
 
 ```bash
-# One-click install (Python packages + Chromium browser)
+# 一键安装（Python 依赖 + Chrome 浏览器）
 bash install.sh
 
-# Or manually:
+# 或手动安装：
 pip install -r requirements.txt
-playwright install chromium
+playwright install chrome
 ```
 
-### Step 2: Configure
+### 第二步：配置
 
-Edit `config.py`:
+打开 `config.py`，修改以下内容：
 
 ```python
-# Workflow: who drafts, who critiques, who synthesizes (optional)
-WORKFLOW = ["chatgpt", "claude"]   # e.g. GPT drafts, Claude critiques
+# 工作流：谁负责起草、谁负责批评、谁负责综合（可选）
+WORKFLOW = ["chatgpt", "claude"]   # 例：GPT起草，Claude批评
 
-# Number of iteration rounds
+# 迭代轮数
 "rounds": 2,
 
-# Chrome Profile path (to persist your login sessions)
-# macOS:   "/Users/yourname/Library/Application Support/Google/Chrome"
-# Windows: "C:/Users/yourname/AppData/Local/Google/Chrome/User Data"
-# Linux:   "/home/yourname/.config/google-chrome"
+# Chrome Profile 路径（用来保留你的登录状态）
+# macOS:   "/Users/你的名字/Library/Application Support/Google/Chrome"
+# Windows: "C:/Users/你的名字/AppData/Local/Google/Chrome/User Data"
+# Linux:   "/home/你的名字/.config/google-chrome"
 "chrome_profile_path": "...",
 ```
 
-### Step 3: Login to Platforms (First Time Only)
-
-```bash
-python setup_login.py
-```
-
-A browser window will open. Manually log in to ChatGPT, Claude, and Gemini, then close the window. Your login sessions will be saved.
-
-### Step 4: Run
+### 第三步：运行
 
 ```bash
 python main.py
 ```
 
-Enter your question and wait for the automated iteration to complete.
+首次运行时，程序会自动检测到没有登录记录，会打开所有平台页面让你手动登录。登录完成后在终端按 Enter 继续，登录状态会自动保存。
+
+后续运行会跳过登录步骤，直接进入问题输入。
 
 ---
 
-## Workflow Examples
+## 配置示例
 
-### Option A: GPT drafts, Claude critiques (default)
+### 方案 A：GPT 起草，Claude 批评（默认）
 ```python
 WORKFLOW = ["chatgpt", "claude"]
 ```
 
-### Option B: Claude drafts, Gemini critiques, GPT synthesizes
+### 方案 B：Claude 起草，Gemini 批评，GPT 综合
 ```python
 WORKFLOW = ["claude", "gemini", "chatgpt"]
 ```
 
-### Option C: Single-model self-iteration
+### 方案 C：单模型自我迭代
 ```python
 WORKFLOW = ["chatgpt", "chatgpt"]
 ```
 
 ---
 
-## Output
+## 输出结果
 
-Each run generates two files in the `outputs/` directory:
+每次运行在 `outputs/` 目录生成两个文件：
 
-- `result_<timestamp>.md` — Human-readable Markdown report with the full question, critique, and improvement history
-- `result_<timestamp>.json` — Structured data for programmatic processing
-
----
-
-## FAQ
-
-**Q: Can't find the input box?**  
-A: Platform UIs may change. Add updated CSS selectors to the corresponding platform's `input_selectors` in `agents.py`.
-
-**Q: Response extraction is empty?**  
-A: Update the CSS selectors in the `get_response_text` function for the corresponding platform in `agents.py`. Use browser DevTools to inspect the actual DOM structure.
-
-**Q: How to debug?**  
-A: The browser runs in headed mode — you can watch every step in real time.
-
-**Q: Can I add more platforms?**  
-A: Yes! Add a new platform config in `config.py` under `PLATFORMS`, and create a corresponding Agent class in `agents.py`.
+- `result_时间戳.md` — 可读的 Markdown 报告，包含每轮的问题、批评、改进过程
+- `result_时间戳.json` — 结构化数据，方便二次处理
 
 ---
 
-## Project Structure
+## 常见问题
+
+**Q: 提示找不到输入框？**  
+A: 各平台页面结构可能更新，在 `agents.py` 中对应平台的 `input_selectors` 里添加新的 CSS 选择器。
+
+**Q: 响应提取为空？**  
+A: 在 `agents.py` 中对应平台的 `get_response_text` 函数里更新 CSS 选择器。可以在浏览器开发者工具中检查实际的元素结构。
+
+**Q: 如何调试？**  
+A: 脚本运行时浏览器窗口是可见的，你可以实时观察每一步操作。
+
+**Q: 可以添加更多平台吗？**  
+A: 可以！在 `config.py` 的 `PLATFORMS` 中添加新平台配置，在 `agents.py` 中添加对应的 Agent 类。
+
+---
+
+## 文件结构
 
 ```
 prompt_auto_update/
-├── main.py          # Main program — workflow orchestration
-├── agents.py        # Platform Agent implementations
-├── config.py        # Configuration (edit this!)
-├── setup_login.py   # First-time login helper script
-├── install.sh       # One-click dependency installer
-├── requirements.txt # Python dependencies
-├── README.md        # This file (English)
-├── README_CN.md     # 中文文档
-└── outputs/         # Results output directory (auto-created)
+├── main.py          # 主程序，工作流调度 + 自动登录
+├── agents.py        # 各平台 Agent 实现
+├── config.py        # 配置（改这里！）
+├── install.sh       # 一键安装脚本
+├── requirements.txt # Python 依赖
+├── README.md        # 本文件（说明文档）
+└── output/          # 结果输出目录（自动创建）
 ```
-
----
-
-## License
-
-MIT
